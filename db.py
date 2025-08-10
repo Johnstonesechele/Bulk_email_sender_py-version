@@ -61,6 +61,20 @@ def add_recipients(campaign_id: int, recipients: List[Tuple[str, str]]):
         conn.commit()
         conn.close()
 
+def create_tables(self):
+    self.cursor.execute("""
+        CREATE TABLE IF NOT EXISTS campaign_stats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            campaign_id INTEGER,
+            sent_count INTEGER DEFAULT 0,
+            failed_count INTEGER DEFAULT 0,
+            responded_count INTEGER DEFAULT 0,
+            total_recipients INTEGER,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    self.conn.commit()
+
 def get_campaigns():
     conn = _connect()
     cur = conn.cursor()
