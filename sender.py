@@ -86,41 +86,39 @@ class SenderWorker(QObject):
 
         return rid, f"failed: {last_error}", self.retry_attempts
 
-    @Slot(int, int, str, str, str)
+    @Slot(int, int, str, str)
     def start_campaign(self, campaign_id: int, total_expected: int, subject: str, body: str, sender_from: str = "noreply@example.com"):
-        recipients = get_recipients_for_campaign(campaign_id)
-        total = len(recipients)
+      recipients = get_recipients_for_campaign(campaign_id)
+      total = len(recipients)
+      sent_count = 0
+      failed_count = 0
+      invalid_count = 0
 
-        sent_count = 0
-        failed_count = 0
-        invalid_count = 0
+      with ThreadPoolExecutor(max_workers=self.concurrency) as ex:
+        futures = {ex.submit(self._send_single, r, subject, body, sender_from): r for r in recipients}
+        for fut in as_completed(futures):
+            if self._stop_event.is_set():
+                break
+            recipient = futures[fut]
+            try:
+                rid, status_text, attempts = fut.result()
+            except Exception as e:
+                rid = recipient['id']
+                status_text = f"error: {e}"
 
-        with ThreadPoolExecutor(max_workers=self.concurrency) as executor:
-            futures = {
-                executor.submit(self._send_single, r, subject, body, sender_from): r for r in recipients
-            }
+            # track results
+            if status_text.startswith("sent"):
+                sent_count += 1
+            elif status_text.startswith("invalid"):
+                invalid_count += 1
+            else:
+                failed_count += 1
 
-            for future in as_completed(futures):
-                if self._stop_event.is_set():
-                    break
+            # update UI
+            self.signals.status.emit(rid, status_text)
+            self.signals.progress.emit(sent_count, total)
 
-                recipient = futures[future]
-                try:
-                    rid, status_text, _ = future.result()
-                except Exception as e:
-                    rid = recipient['id']
-                    status_text = f"error: {e}"
-
-                if status_text.startswith("sent"):
-                    sent_count += 1
-                elif status_text.startswith("invalid"):
-                    invalid_count += 1
-                else:
-                    failed_count += 1
-
-                # Update UI
-                self.signals.status.emit(rid, status_text)
-                self.signals.progress.emit(sent_count, total)
-
-        # Final signal with summary stats
-        self.signals.finished.emit(sent_count, failed_count, invalid_count)
+       # Final summary emit
+      summary_text = f"Campaign {campaign_id} finished: Sent={sent_count}, Failed={failed_count}, Invalid={invalid_count}"
+      print(summary_text)  # Also log to console for debugging
+      self.signals.finished.emit()  # You could also send (sent_count, failed_count, invalid_count) via a custom signal if UI needs it
