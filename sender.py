@@ -2,24 +2,22 @@
 import smtplib
 import time
 import threading
+import datetime
+import re
 from email.message import EmailMessage
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from PySide6.QtCore import QObject, Signal, Slot, QThread
 from db import update_recipient_status, get_recipients_for_campaign
 from email_validator import validate_email, EmailNotValidError
 
-class SenderSignals(QObject):
-    progress = Signal(int, int)        # sent_count, total
-    status = Signal(int, str)          # recipient_id, status_text
-    finished = Signal(int, int, int)   # sent_count, failed_count, invalid_count
-
 
 class SenderWorker(QObject):
+    progress = Signal(int, int, int)  # sent, failed, responded
+    finished = Signal(int, int, int)  # sent, failed, responded
     def __init__(self, smtp_host: str, smtp_port: int, smtp_user: str = None, smtp_pass: str = None,
                  use_tls: bool = False, concurrency: int = 4, rate_per_sec: float = 1.0,
                  retry_attempts: int = 2, retry_backoff: float = 2.0):
         super().__init__()
-        self.signals = SenderSignals()
         self.smtp_host = smtp_host
         self.smtp_port = smtp_port
         self.smtp_user = smtp_user
@@ -87,38 +85,56 @@ class SenderWorker(QObject):
         return rid, f"failed: {last_error}", self.retry_attempts
 
     @Slot(int, int, str, str)
-    def start_campaign(self, campaign_id: int, total_expected: int, subject: str, body: str, sender_from: str = "noreply@example.com"):
-      recipients = get_recipients_for_campaign(campaign_id)
-      total = len(recipients)
-      sent_count = 0
-      failed_count = 0
-      invalid_count = 0
+    def start_campaign(self, campaign_id, start_index, subject, body, sender_from):
+        recipients = self.db.get_recipients(campaign_id)
 
-      with ThreadPoolExecutor(max_workers=self.concurrency) as ex:
-        futures = {ex.submit(self._send_single, r, subject, body, sender_from): r for r in recipients}
-        for fut in as_completed(futures):
-            if self._stop_event.is_set():
-                break
-            recipient = futures[fut]
-            try:
-                rid, status_text, attempts = fut.result()
-            except Exception as e:
-                rid = recipient['id']
-                status_text = f"error: {e}"
+        sent_count = 0
+        failed_count = 0
+        invalid_count = 0
 
-            # track results
-            if status_text.startswith("sent"):
-                sent_count += 1
-            elif status_text.startswith("invalid"):
+        # SMTP connection setup
+        try:
+            server = smtplib.SMTP(self.smtp_server, self.smtp_port)
+            server.starttls()
+            server.login(self.smtp_user, self.smtp_password)
+        except Exception as e:
+            print(f"SMTP Connection Error: {e}")
+            self.finished.emit(sent_count, failed_count, invalid_count)
+            return
+
+        # Loop over recipients
+        for idx, r in enumerate(recipients[start_index:], start=start_index):
+            email_addr = r.email.strip()
+
+            # Increment attempts
+            self.db.increment_attempts(r.id)
+
+            # Validate email format
+            if not re.match(r"[^@]+@[^@]+\.[^@]+", email_addr):
+                self.db.update_recipient_status(r.id, "invalid", "Invalid email format")
                 invalid_count += 1
-            else:
+                self.progress.emit(sent_count, failed_count, invalid_count)
+                continue
+
+            try:
+                # Send email
+                message = f"From: {sender_from}\nTo: {email_addr}\nSubject: {subject}\n\n{body}"
+                server.sendmail(sender_from, [email_addr], message)
+
+                self.db.update_recipient_status(r.id, "sent")
+                sent_count += 1
+            except Exception as ex:
+                self.db.update_recipient_status(r.id, "failed", str(ex))
                 failed_count += 1
 
-            # update UI
-            self.signals.status.emit(rid, status_text)
-            self.signals.progress.emit(sent_count, total)
+            # Emit real-time progress update
+            self.progress.emit(sent_count, failed_count, invalid_count)
 
-       # Final summary emit
-      summary_text = f"Campaign {campaign_id} finished: Sent={sent_count}, Failed={failed_count}, Invalid={invalid_count}"
-      print(summary_text)  # Also log to console for debugging
-      self.signals.finished.emit(sent_count, failed_count, 0)  # You could also send (sent_count, failed_count, invalid_count) via a custom signal if UI needs it
+        # Close SMTP connection
+        try:
+            server.quit()
+        except:
+            pass
+
+        # Emit final result
+        self.finished.emit(sent_count, failed_count, invalid_count)
