@@ -388,9 +388,9 @@ class MainWindow(QMainWindow):
                                           use_tls=use_tls, concurrency=concurrency)
         self.sender_worker.moveToThread(self.sender_thread)
         # wire signals (Qt will queue these because signals come from worker thread)
-        self.sender_worker.progress.connect(self.email_tab.on_progress)
-        self.sender_worker.finished.connect(self.email_tab.on_finished)
-        
+        self.sender_worker.signals.progress.connect(self.email_tab.on_progress)
+        self.sender_worker.signals.status.connect(self.on_recipient_status)
+        self.sender_worker.signals.finished.connect(self.on_sending_finished)
         # start sending once thread starts
         self.sender_thread.started.connect(lambda: self.sender_worker.start_campaign(campaign_id, 0, subject, body, smtp_user or "noreply@example.com"))
         self.sender_thread.start()
