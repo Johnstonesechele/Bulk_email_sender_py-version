@@ -16,6 +16,7 @@ class Recipient:
     campaign_id: int
     email: str
     name: Optional[str] = None
-    status: str = "pending"   # pending, sent, failed
+    status: str = "pending"   # pending, sent, failed, responded
     last_error: Optional[str] = None
     attempts: int = 0
+    responded_at: Optional[str] = None  # Timestamp for when response was recorded
