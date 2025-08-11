@@ -13,6 +13,7 @@ class SenderSignals(QObject):
     status = Signal(int, str)     # recipient_id, status_text
     finished = Signal()
 
+
 class SenderWorker(QObject):
     """
     Runs in a QThread. Uses ThreadPoolExecutor to send messages concurrently,
