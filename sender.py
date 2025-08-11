@@ -121,4 +121,4 @@ class SenderWorker(QObject):
        # Final summary emit
       summary_text = f"Campaign {campaign_id} finished: Sent={sent_count}, Failed={failed_count}, Invalid={invalid_count}"
       print(summary_text)  # Also log to console for debugging
-      self.signals.finished.emit()  # You could also send (sent_count, failed_count, invalid_count) via a custom signal if UI needs it
+      self.signals.finished.emit(sent_count, failed_count, 0)  # You could also send (sent_count, failed_count, invalid_count) via a custom signal if UI needs it
