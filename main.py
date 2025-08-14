@@ -26,7 +26,7 @@ QLineEdit, QTextEdit { background: #0f1720; color: #e6eef7; border: 1px solid #2
 QProgressBar { background: #0f1720; color: #e6eef7; border: 1px solid #2b3948; }
 """
 
-EMAIL_REGEX = re.compile(r"[^@]+@[^@]+\.[^@]+")
+EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def is_valid_email(email: str) -> bool:
